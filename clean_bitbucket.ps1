@@ -64,21 +64,28 @@ function Remove-DeployKey([string]$team, [string]$reposlug, [string]$uid, $heade
 
 if ($Data.operationName -match "Microsoft.Compute/virtualMachines/delete" -and $Data.status -match "Succeeded" -and $Data.resourceUri.Contains("puppet")) {
   $vmname = $Data.resourceUri.split('/') | Select-Object -Last 1
-  $auth = Get-Auth
-  $repos = Get-AllRepositories -team $BitbucketTeam -headers $auth
-  foreach ($repo in $repos) {
-    Write-Output "Checking $($repo.slug)"
-    Get-Hooks -team $BitbucketTeam -reposlug $repo.slug -headers $auth | ForEach-Object {
-      if ($_.description -like $vmname) {
-        Write-Output "----Deleting hook $($_.description)"
-        Remove-Hook -team $BitbucketTeam -reposlug $repo.slug -uid $_.uuid -headers $auth
+  [string]$inprogress = Get-AutomationVariable -Name "inprogress"
+  if ($inprogress -notcontains $vmname) {
+    Write-Verbose "Cleaning $vmname"
+    Set-AutomationVariable -Name "inprogress" -Value "$inprogress,$vmname"
+    $auth = Get-Auth
+    $repos = Get-AllRepositories -team $BitbucketTeam -headers $auth
+    foreach ($repo in $repos) {
+      Write-Verbose "Checking $($repo.slug)"
+      Get-Hooks -team $BitbucketTeam -reposlug $repo.slug -headers $auth | ForEach-Object {
+        if ($_.description -like $vmname) {
+          Write-Verbose "----Deleting hook $($_.description)"
+          Remove-Hook -team $BitbucketTeam -reposlug $repo.slug -uid $_.uuid -headers $auth
+        }
+      }
+      Get-DeployKeys -team $BitbucketTeam -reposlug $repo.slug -headers $auth | ForEach-Object {
+        if ($_.label -like $vmname) {
+          Write-Verbose "----Deleting key $($_.label)"
+          Remove-DeployKey -team $BitbucketTeam -reposlug $repo.slug -uid $_.pk -headers $auth
+        }
       }
     }
-    Get-DeployKeys -team $BitbucketTeam -reposlug $repo.slug -headers $auth | ForEach-Object {
-      if ($_.label -like $vmname) {
-        Write-Output "----Deleting key $($_.label)"
-        Remove-DeployKey -team $BitbucketTeam -reposlug $repo.slug -uid $_.pk -headers $auth
-      }
-    }
+    [string]$inprogress = Get-AutomationVariable -Name "inprogress"
+    Set-AutomationVariable -Name "inprogress" -Value $inprogress.Replace(",$vmname", "")
   }
 }
